@@ -12,13 +12,13 @@ pub fn build(b: *std.Build) void {
     ) orelse true;
     if (target.result.cpu.arch.isWasm() and target.query.cpu_model == .determined_by_arch_os) {
         var query = target.query;
-        query.cpu_features_add.addFeature(@intFromEnum(std.Target.wasm.Feature.simd128));
+        query.cpu_features_add.addFeature(@backingInt(std.Target.wasm.Feature.simd128));
         if (wasm_relaxed) {
-            query.cpu_features_add.addFeature(@intFromEnum(std.Target.wasm.Feature.relaxed_simd));
+            query.cpu_features_add.addFeature(@backingInt(std.Target.wasm.Feature.relaxed_simd));
         }
         target = b.resolveTargetQuery(query);
     }
-    const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseFast });
+    const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .fast });
     const version = std.SemanticVersion.parse("0.10.6") catch unreachable;
     const linkage = b.option(std.builtin.LinkMode, "linkage", "Link mode") orelse .static;
 
@@ -120,21 +120,8 @@ pub fn build(b: *std.Build) void {
         .source_dir = b.path("src/include"),
     });
 
-    const aegis_h = b.addTranslateC(.{
-        .root_source_file = b.path("src/include/aegis.h"),
-        .target = target,
-        .optimize = .Debug,
-    });
-    aegis_h.addIncludePath(b.path("src/include"));
-    const aegis_mod = aegis_h.createModule();
-
-    const keccak_h = b.addTranslateC(.{
-        .root_source_file = b.path("src/common/keccak.h"),
-        .target = target,
-        .optimize = .Debug,
-    });
-    keccak_h.addIncludePath(b.path("src/common"));
-    const keccak_mod = keccak_h.createModule();
+    const aegis_mod = translateHeader(b, target, "src/include/aegis.h");
+    const keccak_mod = translateHeader(b, target, "src/common/keccak.h");
 
     const main_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -195,4 +182,16 @@ pub fn build(b: *std.Build) void {
         benchmark.root_module.linkLibrary(lib);
         b.installArtifact(benchmark);
     }
+}
+
+fn translateHeader(b: *std.Build, target: std.Build.ResolvedTarget, header: []const u8) *std.Build.Module {
+    const translate = b.addSystemCommand(&.{ b.graph.zig_exe, "translate-c", "-target", target.result.zigTriple(b.allocator) catch @panic("OOM") });
+    // Let the compiler's cache track transitive header dependencies.
+    translate.has_side_effects = true;
+    translate.addFileArg(b.path(header));
+    return b.createModule(.{
+        .root_source_file = translate.captureStdOut(.{ .basename = "translated.zig" }),
+        .target = target,
+        .optimize = .debug,
+    });
 }
