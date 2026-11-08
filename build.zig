@@ -31,6 +31,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .strip = true,
             .link_libc = true,
+            .pic = true,
         }),
     });
 
